@@ -61,6 +61,49 @@ namespace GapInMyResume.API.Controllers
             }
         }
 
+        // GET: api/timeline/date/{date}
+        [HttpGet("date/{date}")]
+        public async Task<ActionResult<TimelineItem>> GetTimelineItemByDate(string date)
+        {
+            try
+            {
+                _logger.LogInformation($"Searching for timeline item with date: {date}");
+                
+                // Parse the date string to DateTime
+                if (!DateTime.TryParse(date, out DateTime parsedDate))
+                {
+                    _logger.LogWarning($"Invalid date format received: {date}");
+                    return BadRequest("Invalid date format. Expected format: YYYY-MM-DD");
+                }
+
+                // Get all timeline items and filter by date
+                var allItems = await _cosmosDbService.GetTimelineItemsAsync();
+                _logger.LogInformation($"Found {allItems.Count()} total timeline items");
+                
+                // Log all dates for debugging
+                foreach (var item in allItems)
+                {
+                    _logger.LogInformation($"Timeline item date: {item.Date:yyyy-MM-dd} (comparing with {parsedDate:yyyy-MM-dd})");
+                }
+                
+                var matchingItem = allItems.FirstOrDefault(x => x.Date.Date == parsedDate.Date);
+                
+                if (matchingItem == null)
+                {
+                    _logger.LogInformation($"No timeline item found for date: {parsedDate:yyyy-MM-dd}");
+                    return NotFound($"No timeline item found for date: {parsedDate:yyyy-MM-dd}");
+                }
+                
+                _logger.LogInformation($"Found timeline item: {matchingItem.Title} for date: {parsedDate:yyyy-MM-dd}");
+                return Ok(matchingItem);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error retrieving timeline item for date: {date}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
         // POST: api/timeline
         [HttpPost]
         public async Task<ActionResult<TimelineItem>> CreateTimelineItem([FromForm] CreateTimelineItemDto dto)
@@ -92,6 +135,8 @@ namespace GapInMyResume.API.Controllers
                 }
 
                 var createdItem = await _cosmosDbService.CreateTimelineItemAsync(timelineItem);
+                _logger.LogInformation($"Created timeline item: {createdItem.Title} for date: {createdItem.Date:yyyy-MM-dd}");
+                
                 return CreatedAtAction(nameof(GetTimelineItem), new { id = createdItem.Id }, createdItem);
             }
             catch (Exception ex)

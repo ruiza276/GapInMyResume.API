@@ -68,3 +68,4 @@
 /home/alex/_repos/gapinmyresume-dev/GapInMyResume.API/obj/Debug/net8.0/GapInMyResume.API.pdb
 /home/alex/_repos/gapinmyresume-dev/GapInMyResume.API/obj/Debug/net8.0/GapInMyResume.API.genruntimeconfig.cache
 /home/alex/_repos/gapinmyresume-dev/GapInMyResume.API/obj/Debug/net8.0/ref/GapInMyResume.API.dll
+/home/alex/_repos/gapinmyresume-dev/GapInMyResume.API/obj/Debug/net8.0/GapInMyResume.API.sourcelink.json
