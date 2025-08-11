@@ -7,6 +7,7 @@ namespace GapInMyResume.API.Services
     public interface ICosmosDbService
     {
         Task<IEnumerable<TimelineItem>> GetTimelineItemsAsync();
+        Task<IEnumerable<TimelineItem>> GetTimelineItemsByDateAsync(DateTime date);
         Task<TimelineItem?> GetTimelineItemAsync(string id);
         Task<TimelineItem> CreateTimelineItemAsync(TimelineItem item);
         Task<TimelineItem?> UpdateTimelineItemAsync(string id, TimelineItem item);
@@ -15,6 +16,7 @@ namespace GapInMyResume.API.Services
         Task<IEnumerable<VisitorMessage>> GetMessagesAsync();
         Task<VisitorMessage> CreateMessageAsync(VisitorMessage message);
         Task<bool> DeleteMessageAsync(string id);
+        Task AddMessageAsync(VisitorMessage message);
     }
 
     public class CosmosDbService : ICosmosDbService
@@ -34,27 +36,64 @@ namespace GapInMyResume.API.Services
             _logger = logger;
         }
 
-        // Timeline Items
+        // Optimized query for all timeline items
         public async Task<IEnumerable<TimelineItem>> GetTimelineItemsAsync()
         {
             try
             {
-                var query = _timelineContainer.GetItemQueryIterator<TimelineItem>(
-                    "SELECT * FROM c ORDER BY c.Date DESC");
+                // Use efficient query with proper indexing
+                var query = "SELECT * FROM c ORDER BY c.date DESC";
+                var queryDefinition = new QueryDefinition(query);
                 
+                var iterator = _timelineContainer.GetItemQueryIterator<TimelineItem>(queryDefinition);
                 var results = new List<TimelineItem>();
-                while (query.HasMoreResults)
+                
+                while (iterator.HasMoreResults)
                 {
-                    var response = await query.ReadNextAsync();
-                    results.AddRange(response);
+                    var response = await iterator.ReadNextAsync();
+                    results.AddRange(response.ToList());
+                    
+                    // Log RU consumption to monitor usage
+                    _logger.LogInformation($"Timeline query consumed {response.RequestCharge} RUs");
                 }
                 
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving timeline items");
+                _logger.LogError(ex, "Error retrieving timeline items from Cosmos DB");
                 return new List<TimelineItem>();
+            }
+        }
+
+        // Optimized query for specific date
+        public async Task<IEnumerable<TimelineItem>> GetTimelineItemsByDateAsync(DateTime date)
+        {
+            try
+            {
+                // Efficient query using date as filter
+                var dateString = date.ToString("yyyy-MM-dd");
+                var query = "SELECT * FROM c WHERE STARTSWITH(c.date, @date)";
+                var queryDefinition = new QueryDefinition(query)
+                    .WithParameter("@date", dateString);
+                
+                var iterator = _timelineContainer.GetItemQueryIterator<TimelineItem>(queryDefinition);
+                var results = new List<TimelineItem>();
+                
+                while (iterator.HasMoreResults)
+                {
+                    var response = await iterator.ReadNextAsync();
+                    results.AddRange(response.ToList());
+                    
+                    _logger.LogInformation($"Date query consumed {response.RequestCharge} RUs");
+                }
+                
+                return results;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error fetching timeline items for date {date}");
+                throw;
             }
         }
 
@@ -63,11 +102,17 @@ namespace GapInMyResume.API.Services
             try
             {
                 var response = await _timelineContainer.ReadItemAsync<TimelineItem>(id, new PartitionKey(id));
+                _logger.LogInformation($"Single item query consumed {response.RequestCharge} RUs");
                 return response.Resource;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
                 return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error fetching timeline item with ID: {id}");
+                throw;
             }
         }
 
@@ -76,6 +121,7 @@ namespace GapInMyResume.API.Services
             try
             {
                 var response = await _timelineContainer.CreateItemAsync(item, new PartitionKey(item.Id));
+                _logger.LogInformation($"Timeline item creation consumed {response.RequestCharge} RUs");
                 return response.Resource;
             }
             catch (Exception ex)
@@ -91,11 +137,17 @@ namespace GapInMyResume.API.Services
             {
                 item.Id = id; // Ensure ID matches
                 var response = await _timelineContainer.UpsertItemAsync(item, new PartitionKey(id));
+                _logger.LogInformation($"Timeline item update consumed {response.RequestCharge} RUs");
                 return response.Resource;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
                 return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error updating timeline item with ID: {id}");
+                throw;
             }
         }
 
@@ -103,35 +155,45 @@ namespace GapInMyResume.API.Services
         {
             try
             {
-                await _timelineContainer.DeleteItemAsync<TimelineItem>(id, new PartitionKey(id));
+                var response = await _timelineContainer.DeleteItemAsync<TimelineItem>(id, new PartitionKey(id));
+                _logger.LogInformation($"Timeline item deletion consumed {response.RequestCharge} RUs");
                 return true;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
                 return false;
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting timeline item with ID: {id}");
+                throw;
+            }
         }
 
-        // Messages
+        // Messages - optimized versions
         public async Task<IEnumerable<VisitorMessage>> GetMessagesAsync()
         {
             try
             {
-                var query = _messagesContainer.GetItemQueryIterator<VisitorMessage>(
-                    "SELECT * FROM c ORDER BY c.Timestamp DESC");
+                var query = "SELECT * FROM c ORDER BY c.timestamp DESC";
+                var queryDefinition = new QueryDefinition(query);
                 
+                var iterator = _messagesContainer.GetItemQueryIterator<VisitorMessage>(queryDefinition);
                 var results = new List<VisitorMessage>();
-                while (query.HasMoreResults)
+                
+                while (iterator.HasMoreResults)
                 {
-                    var response = await query.ReadNextAsync();
-                    results.AddRange(response);
+                    var response = await iterator.ReadNextAsync();
+                    results.AddRange(response.ToList());
+                    
+                    _logger.LogInformation($"Messages query consumed {response.RequestCharge} RUs");
                 }
                 
                 return results;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving messages");
+                _logger.LogError(ex, "Error retrieving messages from Cosmos DB");
                 return new List<VisitorMessage>();
             }
         }
@@ -141,6 +203,7 @@ namespace GapInMyResume.API.Services
             try
             {
                 var response = await _messagesContainer.CreateItemAsync(message, new PartitionKey(message.Id));
+                _logger.LogInformation($"Message creation consumed {response.RequestCharge} RUs");
                 return response.Resource;
             }
             catch (Exception ex)
@@ -150,16 +213,28 @@ namespace GapInMyResume.API.Services
             }
         }
 
+        // For backward compatibility
+        public async Task AddMessageAsync(VisitorMessage message)
+        {
+            await CreateMessageAsync(message);
+        }
+
         public async Task<bool> DeleteMessageAsync(string id)
         {
             try
             {
-                await _messagesContainer.DeleteItemAsync<VisitorMessage>(id, new PartitionKey(id));
+                var response = await _messagesContainer.DeleteItemAsync<VisitorMessage>(id, new PartitionKey(id));
+                _logger.LogInformation($"Message deletion consumed {response.RequestCharge} RUs");
                 return true;
             }
             catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
                 return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deleting message with ID: {id}");
+                throw;
             }
         }
     }

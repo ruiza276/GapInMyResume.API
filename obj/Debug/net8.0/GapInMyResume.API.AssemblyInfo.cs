@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("GapInMyResume.API")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7ad9db3ba3f1028c22bccdd423ac3a914a12a0aa")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0a7fd6b171a5bb2d1c5f09c393dd12ad59ebb176")]
 [assembly: System.Reflection.AssemblyProductAttribute("GapInMyResume.API")]
 [assembly: System.Reflection.AssemblyTitleAttribute("GapInMyResume.API")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

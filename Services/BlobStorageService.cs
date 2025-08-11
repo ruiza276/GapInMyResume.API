@@ -28,25 +28,35 @@ namespace GapInMyResume.API.Services
                 // Ensure container exists with appropriate access level
                 var containerClient = await EnsureContainerExistsAsync(containerName);
                 
-                // Create unique filename
-                var fileName = $"{Guid.NewGuid()}_{file.FileName}";
-                var blobClient = containerClient.GetBlobClient(fileName);
+                // Create unique filename to prevent overwrites - keeping your existing pattern
+                var uniqueFileName = $"{Guid.NewGuid()}_{file.FileName}";
+                var blobClient = containerClient.GetBlobClient(uniqueFileName);
 
-                // Set content type and cache control
+                // Set content type and cache control with optimized settings
                 var blobHttpHeaders = new BlobHttpHeaders
                 {
                     ContentType = file.ContentType ?? GetContentTypeFromExtension(file.FileName),
-                    CacheControl = "public, max-age=31536000" // Cache for 1 year
+                    CacheControl = "public, max-age=31536000" // Cache for 1 year for optimization
+                };
+
+                // Upload with optimized settings for Azure free tier
+                var uploadOptions = new BlobUploadOptions
+                {
+                    HttpHeaders = blobHttpHeaders,
+                    AccessTier = AccessTier.Hot, // Use hot tier for frequently accessed files
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["OriginalFileName"] = file.FileName,
+                        ["UploadDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                        ["FileSize"] = file.Length.ToString()
+                    }
                 };
 
                 // Upload file
                 using var stream = file.OpenReadStream();
-                await blobClient.UploadAsync(stream, new BlobUploadOptions
-                {
-                    HttpHeaders = blobHttpHeaders
-                });
+                await blobClient.UploadAsync(stream, uploadOptions);
 
-                _logger.LogInformation($"File uploaded successfully: {fileName} to container: {containerName}");
+                _logger.LogInformation($"File uploaded successfully: {uniqueFileName} ({file.Length} bytes) to container: {containerName}");
                 return blobClient.Uri.ToString();
             }
             catch (Exception ex)
@@ -93,7 +103,7 @@ namespace GapInMyResume.API.Services
         }
 
         /// <summary>
-        /// Ensures the container exists with appropriate access level
+        /// Ensures the container exists with appropriate access level and optimized settings
         /// </summary>
         private async Task<BlobContainerClient> EnsureContainerExistsAsync(string containerName)
         {
@@ -131,8 +141,11 @@ namespace GapInMyResume.API.Services
                     _logger.LogDebug($"Container already exists: {containerName}");
                 }
 
-                // Set CORS rules for the storage account
-                await SetCorsRulesAsync();
+                // Set CORS rules for the storage account (optimized for images)
+                if (containerName.ToLower().Contains("image"))
+                {
+                    await SetupCorsRulesAsync();
+                }
 
                 return containerClient;
             }
@@ -144,9 +157,9 @@ namespace GapInMyResume.API.Services
         }
 
         /// <summary>
-        /// Sets CORS rules for the blob storage account
+        /// Sets up CORS rules for image containers to allow web access
         /// </summary>
-        private async Task SetCorsRulesAsync()
+        private async Task SetupCorsRulesAsync()
         {
             try
             {
@@ -155,18 +168,19 @@ namespace GapInMyResume.API.Services
                 // Check if CORS rules already exist
                 if (serviceProperties.Value.Cors == null || !serviceProperties.Value.Cors.Any())
                 {
-                    serviceProperties.Value.Cors = new[]
+                    var corsRules = new List<BlobCorsRule>
                     {
                         new BlobCorsRule
                         {
-                            AllowedOrigins = "*", // In production, replace with your domain
+                            AllowedOrigins = "*", // In production, specify your domain
                             AllowedMethods = "GET,PUT,POST,DELETE,HEAD,OPTIONS",
                             AllowedHeaders = "*",
                             ExposedHeaders = "*",
                             MaxAgeInSeconds = 86400 // 24 hours
                         }
                     };
-                    
+
+                    serviceProperties.Value.Cors = corsRules;
                     await _blobServiceClient.SetPropertiesAsync(serviceProperties.Value);
                     _logger.LogInformation("CORS rules set for blob storage");
                 }
@@ -174,6 +188,7 @@ namespace GapInMyResume.API.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to set CORS rules - images may not display properly");
+                // Don't throw here as CORS might already be configured at storage account level
             }
         }
 
