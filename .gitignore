@@ -1,3 +1,6 @@
 GapInMyResume.API/appsettings.Development.json
 appsettings.Development.json
 appsettings.json
+appsettings.Production.json
+deploy.zip
+/home/alex/_repos/gapinmyresume-dev/GapInMyResume.API/publish

@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "FP7I0SpLrEKvISOz3jqZnlch1yUIQ+bx7nDcjzADTfs=",
+  "Source": "GapInMyResume.API",
+  "BasePath": "_content/GapInMyResume.API",
+  "Mode": "Default",
+  "ManifestType": "Publish",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
