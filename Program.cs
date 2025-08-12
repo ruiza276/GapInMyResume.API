@@ -22,43 +22,77 @@ public class Program
             options.UseCaseSensitivePaths = false;
         });
 
+        // Add response compression for production
+        builder.Services.AddResponseCompression(options =>
+        {
+            options.EnableForHttps = true;
+        });
+
         // Add memory cache for optimization
         builder.Services.AddMemoryCache();
 
         // Add usage monitoring service
         builder.Services.AddSingleton<UsageMonitoringService>();
 
-        // Configure CORS
+        // Configure CORS - Enhanced for production
         builder.Services.AddCors(options =>
         {
             options.AddPolicy("AllowReactApp", policy =>
             {
-                policy.WithOrigins(
-                        builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? new[] { "http://localhost:3000", "https://localhost:3000" }
-                    )
+                // Get allowed origins from configuration with fallbacks
+                var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+                    ?? new[] {
+                        "http://localhost:3000",
+                        "https://localhost:3000",
+                        "https://gapinmyresume.dev",
+                        "https://gapinmyresume.netlify.app/"
+                    };
+
+                policy.WithOrigins(allowedOrigins)
                     .AllowAnyHeader()
                     .AllowAnyMethod()
                     .AllowCredentials();
             });
         });
 
-        // Configure Azure Blob Storage
+        // Configure Azure Blob Storage - Enhanced with multiple connection string sources
         builder.Services.AddSingleton(x =>
         {
-            var connectionString = builder.Configuration["BlobStorage:ConnectionString"];
+            var connectionString = builder.Configuration["BlobStorage:ConnectionString"] 
+                ?? builder.Configuration.GetConnectionString("BlobStorage")
+                ?? builder.Configuration["BlobStorage__ConnectionString"]; // Azure App Service format
+
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                throw new InvalidOperationException("Blob Storage connection string is not configured");
+            }
+
             return new BlobServiceClient(connectionString);
         });
 
-        // Configure Azure Cosmos DB
+        // Configure Azure Cosmos DB - Enhanced with multiple connection string sources
         builder.Services.AddSingleton(x =>
         {
-            var connectionString = builder.Configuration["CosmosDb:ConnectionString"];
+            var connectionString = builder.Configuration["CosmosDb:ConnectionString"] 
+                ?? builder.Configuration.GetConnectionString("CosmosDb")
+                ?? builder.Configuration["CosmosDb__ConnectionString"]; // Azure App Service format
+
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                throw new InvalidOperationException("Cosmos DB connection string is not configured");
+            }
+
             var options = new CosmosClientOptions
             {
                 SerializerOptions = new CosmosSerializationOptions
                 {
                     PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase
-                }
+                },
+                // Production optimizations
+                ConnectionMode = ConnectionMode.Direct,
+                RequestTimeout = TimeSpan.FromSeconds(30),
+                OpenTcpConnectionTimeout = TimeSpan.FromSeconds(10),
+                IdleTcpConnectionTimeout = TimeSpan.FromMinutes(10)
             };
             return new CosmosClient(connectionString, options);
         });
@@ -75,18 +109,25 @@ public class Program
             app.UseSwagger();
             app.UseSwaggerUI();
         }
+        else
+        {
+            // Production-only middleware
+            app.UseHttpsRedirection();
+            app.UseHsts(); // HTTP Strict Transport Security
+        }
 
-        app.UseHttpsRedirection();
+        // Use response compression (for production)
+        app.UseResponseCompression();
 
         // Configure caching middleware
         app.UseResponseCaching();
 
-        // Add cache headers for API responses
+        // Add cache headers for API responses - Enhanced
         app.Use(async (context, next) =>
         {
             if (context.Request.Path.StartsWithSegments("/api"))
             {
-                // API responses - short cache for frequently accessed endpoints
+                // API responses - different cache times for different endpoints
                 if (context.Request.Path.StartsWithSegments("/api/timeline"))
                 {
                     context.Response.GetTypedHeaders().CacheControl =
@@ -94,6 +135,24 @@ public class Program
                         {
                             Public = true,
                             MaxAge = TimeSpan.FromMinutes(5)
+                        };
+                }
+                else if (context.Request.Path.StartsWithSegments("/api/messages"))
+                {
+                    context.Response.GetTypedHeaders().CacheControl =
+                        new Microsoft.Net.Http.Headers.CacheControlHeaderValue()
+                        {
+                            Public = true,
+                            MaxAge = TimeSpan.FromMinutes(2)
+                        };
+                }
+                else if (context.Request.Path.StartsWithSegments("/api/files"))
+                {
+                    context.Response.GetTypedHeaders().CacheControl =
+                        new Microsoft.Net.Http.Headers.CacheControlHeaderValue()
+                        {
+                            Public = true,
+                            MaxAge = TimeSpan.FromHours(1) // Files can be cached longer
                         };
                 }
             }
@@ -104,11 +163,53 @@ public class Program
         // Add usage tracking middleware
         app.UseMiddleware<UsageTrackingMiddleware>();
 
+        // Use CORS
         app.UseCors("AllowReactApp");
 
         app.UseAuthorization();
 
         app.MapControllers();
+
+        // Health check endpoint - Enhanced
+        app.MapGet("/health", async (IServiceProvider serviceProvider) =>
+        {
+            try
+            {
+                // Basic health check with dependency validation
+                var cosmosClient = serviceProvider.GetService<CosmosClient>();
+                var blobClient = serviceProvider.GetService<BlobServiceClient>();
+                
+                var health = new
+                {
+                    status = "healthy",
+                    timestamp = DateTime.UtcNow,
+                    environment = app.Environment.EnvironmentName,
+                    dependencies = new
+                    {
+                        cosmosDb = cosmosClient != null ? "configured" : "missing",
+                        blobStorage = blobClient != null ? "configured" : "missing"
+                    }
+                };
+
+                return Results.Ok(health);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(
+                    title: "Health check failed",
+                    detail: ex.Message,
+                    statusCode: 500
+                );
+            }
+        });
+
+        // API root endpoint for testing
+        app.MapGet("/api", () => Results.Ok(new 
+        { 
+            message = "GapInMyResume API is running",
+            version = "1.0.0",
+            timestamp = DateTime.UtcNow
+        }));
 
         // Initialize usage monitoring
         var serviceProvider = app.Services;
