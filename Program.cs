@@ -40,8 +40,9 @@ public class Program
             options.AddPolicy("AllowReactApp", policy =>
             {
                 policy.WithOrigins(
-                        "http://localhost:3000", 
+                        "http://localhost:3000",
                         "https://localhost:3000",
+                        "http://localhost:8888",
                         "https://*.netlify.app",
                         "https://gapinmyresume.dev"
                     )
